@@ -3,14 +3,63 @@ import getopt
 
 import Checksum
 import BasicSender
-
+import sys
 '''
 This is a skeleton sender class. Create a fantastic transport protocol here.
 '''
 class Sender(BasicSender.BasicSender):
     # Main sending loop.
     def start(self):
-        raise NotImplementedError
+        window = 5
+        window_offset = 0
+        pack_list  = []  
+        
+        seqno = 0
+        msg_type = 'start'
+        data_size = 1472 - sys.getsizeof(0xffffffff) - sys.getsizeof(msg_type) - sys.getsizeof(seqno)
+        data = self.infile.read(data_size)
+        start_packet = self.make_packet(msg_type, seqno, data)
+        pack_list.append(start_packet)
+        queue_packets = 1
+        
+        #send start packet and wait for response??
+        
+        #make next 4 packets
+         
+        msg_type = 'data'
+        while(queue_packets < window and not (data == '')):
+            data_size = 1472 - sys.getsizeof(0xffffffff) - sys.getsizeof(msg_type) - sys.getsizeof(seqno + 1)
+            data = self.infile.read(data_size)
+            if (data == ''):
+                break
+            seqno+=1
+            pack_list.append(self.make_packet(msg_type, seqno, data))
+            queue_packets+=1
+        
+        for packet in pack_list:
+            self.send(packet)
+            
+        #wait for response
+        while(not (msg_type == 'end')):
+            response_packet = self.receive()
+            if Checksum.validate_checksum(response_packet):
+                next_seqno= response_packet.split("|")[1]
+                if(next_seqno == seqno + 1):
+                    data_size = 1472 - sys.getsizeof(0xffffffff) - sys.getsizeof(msg_type) - sys.getsizeof(seqno + 1)
+                    data = self.infile.read(data_size)
+                    if (data == ''):
+                        msg_type = 'end'
+                    seqno+=1
+                    packet = self.make_packet(msg_type, seqno, data)
+                    window_offset +=1
+                    pack_list.pop(0)
+                    pack_list.append(packet)
+                    self.send(packet)
+                else:
+                    #resend all of the packets from next_seqno to end of window??  not sure this will solve every case
+                        
+                    
+        
 
 '''
 This will be run if you run this script from the command line. You should not
