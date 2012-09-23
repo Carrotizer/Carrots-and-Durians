@@ -57,7 +57,7 @@ class Sender(BasicSender.BasicSender):
                     self.send(packet)
                 else:
                     #resend all of the packets from next_seqno to end of window??  not sure this will solve every case
-                        
+                    raise NotImplementedError
                     
         
 
