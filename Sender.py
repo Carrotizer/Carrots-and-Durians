@@ -63,26 +63,25 @@ class Sender(BasicSender.BasicSender):
             except KeyError:
                 noop = 1
             
-            #If not done, continue sending new packets 
-            packetsToBeSent = self.makePackets(packetList, next_expected_seqno, self.WINDOW_SIZE)
-            for packet in packetsToBeSent:
-                self.send(packet)
-
-
-            if self.DEBUG:
-                print "Listening for ACKs"
-            #listen for ACKs
-            seqno_list = self.recvMyACKs()
-            if not(seqno_list == []):
-                next_expected_seqno = int(max(seqno_list))
+            if(sendLoopCtrl):#If not done, continue sending new packets 
+                packetsToBeSent = self.makePackets(packetList, next_expected_seqno, self.WINDOW_SIZE)
+                for packet in packetsToBeSent:
+                    self.send(packet)
+    
+    
                 if self.DEBUG:
-                    print "ACK seqnos returned: ", seqno_list
-            else:
-                if self.DEBUG:
-                    print "seqno_list: ", seqno_list
+                    print "Listening for ACKs"
+                #listen for ACKs
+                seqno_list = self.recvMyACKs()
+                if not(seqno_list == []):
+                    next_expected_seqno = int(max(seqno_list))
+                    if self.DEBUG:
+                        print "ACK seqnos returned: ", seqno_list
+                else:
+                    if self.DEBUG:
+                        print "seqno_list: ", seqno_list
             
-            
-                    
+  
     def makePackets(self, existingPackets, startNumber, numPackets):
         packetList = [] 
         for seqno in range(0,numPackets):
@@ -98,7 +97,6 @@ class Sender(BasicSender.BasicSender):
                     self.currentMessageType = "end"
                 packet = self.make_packet(self.currentMessageType, seqno, packetData)
                 existingPackets[seqno] = packet
-                packet = existingPackets[seqno] 
                 
             packetList.append(packet)
             
