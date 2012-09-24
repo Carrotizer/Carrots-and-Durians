@@ -84,7 +84,7 @@ class Sender(BasicSender.BasicSender):
             packetList.append(existingPackets[seqno])
             
             #check to see if packet is end packet, in which case break out of the loop
-            msg_type, seqno, data, checksum = self.split_packet(packet)
+            msg_type = self.split_packet(packet)[0]
             if msg_type == 'end':
                 break
         return packetList
