@@ -9,6 +9,7 @@ This is a skeleton sender class. Create a fantastic transport protocol here.
 '''
 class Sender(BasicSender.BasicSender):
     
+    DEBUG = True
     MAX_PACKET_SIZE = 1472
     WINDOW_SIZE = 5
     
@@ -23,102 +24,107 @@ class Sender(BasicSender.BasicSender):
         
     # Main sending loop.
     def start(self):
-        seqNum = 0      # The packet # that the RECEIVER is expecting
-        windowGap = 5   # This is how many "open" spaces we have for more packets
-        
         packetList = {}  # Keep track of packets.  We may need to resend. 
-                            
-        
-                             
+                                        
         startPacket = self.make_packet("start", 0, self.infile.read(self.startSize))  
         packetList[0] = startPacket
         
         ### TODO: NEED TO TAKE CARE OF THE CASE OF EMPTY FILE
-
+        
+        if self.DEBUG:
+            print "Made start packet"
                                         
         self.nextPacketData = self.infile.read(self.dataSize)
         
         if self.nextPacketData == "":
+            if self.DEBUG:
+                print "Special case: one packet only!"
             self.currentMessageType = "end"
+            #handle this case!!
         else:
             self.currentMessageType = "data"
         
-        #send first round of packets
-        packetsToBeSent = self.makePackets(packetList, 0, self.WINDOW_SIZE)
-        for packet in packetsToBeSent:
-            self.send(packet)
         
         # Main loop for sending.                      
         sendLoopCtrl = True
+        next_expected_seqno = 0
+        if self.DEBUG:
+            print "Entering loop"
         while(sendLoopCtrl):
-            
-            #listen for ACKs
-            seqno_list = self.recvMyACKs()
-            next_expected_seqno = max(seqno_list)
-            
-            
             #check if last packet has been sent and acked
-            if (not (packetList[next_expected_seqno-1] == None)) and (self.split_packet(packetList[next_expected_seqno-1])[0] == "end"):
-                sendLoopCtrl = False
+            try:
+                if self.DEBUG:
+                    if(next_expected_seqno > 0):
+                        print "Testing packet", next_expected_seqno-1, " for end: ",  packetList[next_expected_seqno-1].split("|")[0]
+                if (next_expected_seqno > 0 and packetList[next_expected_seqno-1].split('|')[0] == "end"):
+                    if self.DEBUG:
+                        print "Last packet ACKed"
+                    sendLoopCtrl = False
+            except KeyError:
+                noop = 1
             
             #If not done, continue sending new packets 
-            else:
-                packetsToBeSent = self.makePackets(packetList, next_expected_seqno, self.WINDOW_SIZE)
-                for packet in packetsToBeSent:
-                    self.send(packet)
+            packetsToBeSent = self.makePackets(packetList, next_expected_seqno, self.WINDOW_SIZE)
+            for packet in packetsToBeSent:
+                self.send(packet)
 
+
+            if self.DEBUG:
+                print "Listening for ACKs"
+            #listen for ACKs
+            seqno_list = self.recvMyACKs()
+            if not(seqno_list == []):
+                next_expected_seqno = int(max(seqno_list))
+                if self.DEBUG:
+                    print "ACK seqnos returned: ", seqno_list
+            else:
+                if self.DEBUG:
+                    print "seqno_list: ", seqno_list
+            
+            
                     
     def makePackets(self, existingPackets, startNumber, numPackets):
         packetList = [] 
         for seqno in range(0,numPackets):
             seqno +=startNumber
-            if(existingPackets[seqno] == None): #create the packet if it doesn't already exist
+            try:
+                packet = existingPackets[seqno]
+            except KeyError:
+                #create the packet if it doesn't already exist
                 packetData = self.nextPacketData
-                self.nextPacketData = self.infile.read(self.dataSize)
+                if(not self.currentMessageType == "end"):
+                    self.nextPacketData = self.infile.read(self.dataSize)
                 if self.nextPacketData == "":
                     self.currentMessageType = "end"
                 packet = self.make_packet(self.currentMessageType, seqno, packetData)
                 existingPackets[seqno] = packet
+                packet = existingPackets[seqno] 
                 
-            packet = existingPackets[seqno] #get the packet from dictionary and add it to send list
-            packetList.append(existingPackets[seqno])
+            packetList.append(packet)
             
             #check to see if packet is end packet, in which case break out of the loop
-            msg_type = self.split_packet(packet)[0]
+            msg_type = packet.split('|')[0]
             if msg_type == 'end':
                 break
-        return packetList
-        
-    # Send the packets to fill up the remaining window
-    def sendMyPackets(self, packetsToBeSent):
-        for packet in packetsToBeSent:
-            if (windowGap == 0):
-                break
-            else:
-                self.send(packet)
-                windowGap -= windowGap
-                packetsToBeACKed.append(packet)
-                packetsToBeSent.remove(packet)
-        self.recvMyACKs()        
-        
-        
+        if self.DEBUG:
+            print "Sending ", len(packetList), " packets, starting with number ", startNumber 
+        return packetList      
+                
     # Cumulatively recv's the ACK's from the receiver and processes them.
     # If we don't know that all the packets have been received, e.g., we still need to loop, call sendMyPackets() 
     def recvMyACKs(self):
         ACKlist = []
-        try:
+        currentACK = self.receive(0.5)
+        while currentACK != None:  # If we get something, then check CHECKSUM
+            if Checksum.validate_checksum(currentACK):
+                msg_type, seqno, checksum = currentACK.split('|')
+                ACKlist.append(seqno) #put the next expected packet number in the list
+            
+            #wait for next packet    
             currentACK = self.receive(0.5)
-            while currentACK != None:  # If we get something, then check CHECKSUM
-                if Checksum.validate_checksum(currentACK):
-                    msg_type, seqno, data, checksum = self.split_packet(currentACK)
-                    ACKlist.append(seqno) #put the next expected packet number in the list
-                
-                #wait for next packet    
-                currentACK = self.receive(0.5)
 
         # No ACKs to be received.  Act accordingly.
-        except socket.timeout:
-            return ACKlist
+        return ACKlist
             
     # How specific do we have to be?  Check if the fields are numeric?            
     def checkACKPacket(self, packet):
