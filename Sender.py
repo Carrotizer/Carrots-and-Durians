@@ -9,7 +9,7 @@ This is a skeleton sender class. Create a fantastic transport protocol here.
 '''
 class Sender(BasicSender.BasicSender):
     
-    DEBUG = True
+    DEBUG = False
     MAX_PACKET_SIZE = 1472
     WINDOW_SIZE = 5
     
@@ -61,7 +61,7 @@ class Sender(BasicSender.BasicSender):
                         print "Last packet ACKed"
                     sendLoopCtrl = False
             except KeyError:
-                noop = 1
+                pass
             
             if(sendLoopCtrl):#If not done, continue sending new packets 
                 packetsToBeSent = self.makePackets(packetList, next_expected_seqno, self.WINDOW_SIZE)
