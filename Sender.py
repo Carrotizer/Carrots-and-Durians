@@ -20,57 +20,68 @@ class Sender(BasicSender.BasicSender):
     dataSize = MAX_PACKET_SIZE - sys.getsizeof("data") - 3*sys.getsizeof("|") - sys.getsizeof(0) - sys.getsizeof(0xffffffff)        
     endPacketSize = MAX_PACKET_SIZE - sys.getsizeof("end") - 3*sys.getsizeof("|") - sys.getsizeof(0) - sys.getsizeof(0xffffffff)
         
-    self.packetList = {}  # Keep track of packets.  We may need to resend.
-    self.input_complete = False # True only if we have read everything.  No need to make new packets.
+    packetList = {}  # Keep track of packets.  We may need to resend.
+    input_complete = False # True only if we have read everything.  No need to make new packets.
+    last_seq_num = -1   # seq_num of the 'end' packet
+    current_seq_num = 0   # seqNum to SEND
     
     # Main sending loop.
     def start(self):
-        current_seq_num = 0   # seqNum to SEND
+        if self.DEBUG:
+            print "Starting..."
+            
+        packetsToBeSent = []
         
         self.nextPacketData = self.infile.read(self.startSize)
-        startPacket = self.make_packet(currentMessageType, current_seq_num, self.nextPacketData)
-        packetList[0] = startPacket
-        current_seq_num += 1
+        startPacket = self.make_packet(self.currentMessageType, self.current_seq_num, self.nextPacketData)
+        self.packetList[0] = startPacket
+        packetsToBeSent.append(startPacket)
+        self.current_seq_num += 1
         
         self.updateAndCheck()
 
         # Manually make the first batch                
-        while len(packetList) < 5 and currentMessageType != end:
-            packetList[current_seq_num] = self.make_packet(self.currentMessageType, current_seq_num, self.nextPacketData)
+        while len(self.packetList) < 5 and self.currentMessageType != "end":
+            self.packetList[self.current_seq_num] = self.make_packet(self.currentMessageType, self.current_seq_num, self.nextPacketData)
+            packetsToBeSent.append(self.packetList[self.current_seq_num])
             self.updateAndCheck()     
-            current_seq_num += 1
+            self.current_seq_num += 1
         
         # Main loop for sending.                      
         sendLoopCtrl = True
         next_expected_seqno = 0
         
         while(sendLoopCtrl):
+            if self.DEBUG:
+                print "NOTICE: current_seq_num: %d" % self.current_seq_num
+                print "NOTICE: Sending %d packets" % len(packetsToBeSent)
+            
+            #send packets
+            for packet in packetsToBeSent:
+                self.send(packet)
+            
+            #listen for ACKs
+            if self.DEBUG:
+                print "NOTICE: Listening for ACKs..."
+            seqno_list = self.recvMyACKs()
+            if not seqno_list:  # if the list is empty
+                continue        # resend the same packets
             
             #check if last packet has been sent and ACKed
-            if self.lastPacketACKed(self.packetList, next_expected_seqno-1):
-                if self.DEBUG:
-                    print "Last packet ACKed"
-                sendLoopCtrl = False
+            next_expected_seqno = max(seqno_list)
             
-            else:#If not done, continue sending new packets 
-                packetsToBeSent = self.makePackets(selfpacketList, next_expected_seqno, self.WINDOW_SIZE)
-                
-                #send packets
-                for packet in packetsToBeSent:
-                    self.send(packet)
-    
-                #listen for ACKs
+            if self.last_seq_num == next_expected_seqno - 1:
                 if self.DEBUG:
-                    print "Listening for ACKs"
-                seqno_list = self.recvMyACKs()
-                
-                #find out the highest ACKed packet.  If we have no ACK's, then we need to resend last batch
-                # NOTE: empty list, in Python, is False, boolean-wise
-                if seqno_list:
-                    next_expected_seqno = int(max(seqno_list))
-                    if self.DEBUG:
-                        print "ACK seqnos returned: ", seqno_list
-                        
+                    print "Last packet ACKed.  End packet # is: %d" % self.last_seq_num
+                sendLoopCtrl = False
+                break
+            
+            # We are not done.  Modify the batch to send.
+           
+            else:   #If not done, continue sending new packets 
+                packetsToBeSent = self.makeNextBatch(next_expected_seqno, self.WINDOW_SIZE)
+
+    
             
     '''
     Reads in the next data to update nextPacketData
@@ -81,7 +92,10 @@ class Sender(BasicSender.BasicSender):
     def updateAndCheck(self):
         self.nextPacketData = self.infile.read(self.dataSize)
         if not self.nextPacketData: # if it's ""
+            if self.DEBUG:
+                print "CURRENT PACKET SHOULD BE THE LAST ONE.  current_seq_num: %d" % self.current_seq_num
             self.currentMessageType = "end"
+            self.last_seq_num = self.current_seq_num
                                         
     '''
     Input: current list of packets, seqno of last packet to be ACK'ed
@@ -103,38 +117,31 @@ class Sender(BasicSender.BasicSender):
     Input: seq_num of last ACK , how many packets to send
     Returns the list of next batch of packets to be sent
     '''
-    def makePackets(self, startNumber, numPackets):
-        packetListToSend = [] 
-        for seqno in range(0,numPackets):
-            seqno += startNumber
-            try:
-                packet = self.packetList[seqno] # some packets may need to be resent
-            except KeyError:
-                # create the packet if it doesn't already exist
-                packetData = self.nextPacketData
-                if (not self.currentMessageType == "end"):
-                    self.nextPacketData = self.infile.read(self.dataSize)
-                else:
-                    # Check if the last packet in the list is already an end packet
-                    if packetList[max(packetList.keys())].split('|')[0] == 'end':
-                        
-                    
-                    
-                if self.nextPacketData == "":
-                    self.currentMessageType = "end"
-                packet = self.make_packet(self.currentMessageType, seqno, packetData)
-                self.packetList[seqno] = packet
+    def makeNextBatch(self, startNumber, numPackets):
+        batchToSend = []
+        
+        if self.input_complete: # All the input is complete.  Just send all packets from startNum to max.
+            for seq_num in range(startnumber, max(self.packetList.keys()) + 1):
+                batchToSend.append(self.packetList[seq_num])
+        else:   # We didn't read all the packets yet
+         
+            # First add all the packets 
+            for seq_num in range(startNumber, max(self.packetList.keys()) + 1):
+                batchToSend.append(self.packetList[seq_num])
+            
+            # If we need to throw in more packets, do so now.
+            while len(batchToSend) < 5 and self.current_seq_num <= self.last_seq_num:
+                new_packet = self.make_packet(self.currentMessageType, self.current_seq_num, self.nextPacketData)
+                self.packetList[self.current_seq_num] = new_packet
+                batchToSend.append(new_packet)
+                self.current_seq_num += 1
+                self.updateAndCheck()
+                 
+            if self.DEBUG:
+                print "Sending ", len(batchToSend), " packets, starting with number ", startNumber 
                 
-            packetListToSend.append(packet)
-            
-            #check to see if packet is end packet, in which case break out of the loop
-            if packet.split('|')[0] == "end":
-                break
-            
-        if self.DEBUG:
-            print "Sending ", len(packetListToSend), " packets, starting with number ", startNumber 
-        return packetListToSend   
-    
+            return batchToSend   
+        
     '''            
     # Cumulatively recv's the ACK's from the receiver and processes them.
     # If we don't know that all the packets have been received, e.g., we still need to loop, call sendMyPackets()
@@ -152,7 +159,15 @@ class Sender(BasicSender.BasicSender):
             #wait for next packet    
             currentACK = self.receive(0.5)
 
+        ACKlist = map(int, ACKlist)
         # No ACKs to be received.  Act accordingly.
+        if ACKlist:
+            for key in self.packetList.keys():    # Cleaning up packets stored
+                if key < max(ACKlist) and len(self.packetList) > 1:
+                    if self.DEBUG:
+                        print "Removing packet #%d because we received ACK #%d" % (key, max(ACKlist))
+                    del self.packetList[key]
+            
         return ACKlist
 
 '''
