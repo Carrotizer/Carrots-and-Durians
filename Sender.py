@@ -25,20 +25,20 @@ class Sender(BasicSender.BasicSender):
     
     # Main sending loop.
     def start(self):
-        startPacket = self.make_packet("start", 0, self.infile.read(self.startSize))  
-        self.packetList[0] = startPacket
-                
-        if self.DEBUG:
-            print "Made start packet"
-                                        
-        self.nextPacketData = self.infile.read(self.dataSize)
+        current_seq_num = 0   # seqNum to SEND
         
-        if self.nextPacketData == "":
-            if self.DEBUG:
-                print "Special case: one packet only!"
-            self.currentMessageType = "end"
-        else:
-            self.currentMessageType = "data"
+        self.nextPacketData = self.infile.read(self.startSize)
+        startPacket = self.make_packet(currentMessageType, current_seq_num, self.nextPacketData)
+        packetList[0] = startPacket
+        current_seq_num += 1
+        
+        self.updateAndCheck()
+
+        # Manually make the first batch                
+        while len(packetList) < 5 and currentMessageType != end:
+            packetList[current_seq_num] = self.make_packet(self.currentMessageType, current_seq_num, self.nextPacketData)
+            self.updateAndCheck()     
+            current_seq_num += 1
         
         # Main loop for sending.                      
         sendLoopCtrl = True
@@ -70,7 +70,19 @@ class Sender(BasicSender.BasicSender):
                     next_expected_seqno = int(max(seqno_list))
                     if self.DEBUG:
                         print "ACK seqnos returned: ", seqno_list
-                
+                        
+            
+    '''
+    Reads in the next data to update nextPacketData
+    Check if the next input line is empty.  
+    Update current message type if necessary
+    ASSUMES that 'end' packet has not yet been reached.  If it has, then you are screwed.
+    '''
+    def updateAndCheck(self):
+        self.nextPacketData = self.infile.read(self.dataSize)
+        if not self.nextPacketData: # if it's ""
+            self.currentMessageType = "end"
+                                        
     '''
     Input: current list of packets, seqno of last packet to be ACK'ed
     Used to stop the loop once we get an ACK from the receiver for the 'end' packet
