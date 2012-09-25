@@ -47,7 +47,8 @@ class Sender(BasicSender.BasicSender):
         
 
         # Manually make the first batch                
-        while len(self.packetList) < 5:
+        # 2nd statement is because if we set self.last_seq_num, we are sending 'end' packet in the next iteration, and it does updateAndCheck again
+        while len(self.packetList) < 5 and self.current_seq_num != self.last_seq_num + 1:
             self.packetList[self.current_seq_num] = self.make_packet(self.currentMessageType, self.current_seq_num, self.currentPacketData)
             packetsToBeSent.append(self.make_packet(self.currentMessageType, self.current_seq_num, self.currentPacketData))
             self.updateAndCheck()     
@@ -85,7 +86,7 @@ class Sender(BasicSender.BasicSender):
                 #check if last packet has been sent and ACKed
                 next_expected_seqno = max(seqno_list)
                 
-                if self.last_seq_num >= next_expected_seqno - 1:
+                if self.last_seq_num == next_expected_seqno - 1:    # We got the ACK for the last packet.  Everything should be good.  Should.  FML.
                     if self.DEBUG:
                         print "Last packet ACKed.  End packet # is: %d" % self.last_seq_num
                         print "Sent %d total packets." % self.numSentPackets
@@ -97,21 +98,18 @@ class Sender(BasicSender.BasicSender):
     
             
     '''
-    Reads in the next data to update nextPacketData
-    Check if the next input line is empty.  
-    Update current message type if necessary
-    ASSUMES that 'end' packet has not yet been reached.  If it has, then you are screwed.
+    self.current_seq_num should ALWAYS be the seq_num for the packet.  Update it with this.
     '''
     def updateAndCheck(self):
+        self.current_seq_num += 1
         self.currentPacketData = self.nextPacketData[:]
         self.nextPacketData = self.infile.read(self.currentMessageSize)
-        if self.nextPacketData == "": # if it's ""
+        if self.nextPacketData == "" and self.currentMessageType != "end": # if it's "" and we didn't do this previously
             if self.DEBUG:
-                print "CURRENT PACKET SHOULD BE THE LAST ONE.  current_seq_num: %d" % self.current_seq_num
+                print "CURRENT PACKET SHOULD BE THE LAST ONE.  current_seq_num: %d, last_seq_num: %d" % (self.current_seq_num, self.last_seq_num)
             self.currentMessageType = "end"
-            #self.currentMessageSize = endSize
             self.last_seq_num = self.current_seq_num
-        self.current_seq_num += 1
+        
                                         
     
     '''
@@ -129,7 +127,8 @@ class Sender(BasicSender.BasicSender):
             batchToSend.append(self.packetList[seq_num])
         
         # If we need to throw in more packets, do so now.
-        while len(batchToSend) < 5 and self.current_seq_num > self.last_seq_num:
+        # Read in packet data until "end" packet has been made and saved
+        while len(batchToSend) < 5 and not self.last_seq_num in self.packetList.keys():
             new_packet = self.make_packet(self.currentMessageType, self.current_seq_num, self.currentPacketData)
             self.packetList[self.current_seq_num] = new_packet
             batchToSend.append(new_packet)
