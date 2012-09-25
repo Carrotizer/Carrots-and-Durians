@@ -18,11 +18,11 @@ def tests_to_run(forwarder):
     from tests import BasicTest, RandomDropTest, AlwaysDropTest, RandomCorruptTest, RandomDuplicateTest, RandomReorderTest, RandomDelayTest
     
     file = "README"
-    BasicTest.BasicTest(forwarder, file)
+    BasicTest.BasicTest(forwarder, file) # PASS
     #RandomDropTest.RandomDropTest(forwarder, file)
-    #RandomCorruptTest.RandomCorruptTest(forwarder, file)
-    #RandomDelayTest.RandomDelayTest(forwarder, file)
-    #RandomDuplicateTest.RandomDuplicateTest(forwarder, file)
+    #RandomCorruptTest.RandomCorruptTest(forwarder, file)    # This one is failing...
+    #RandomDelayTest.RandomDelayTest(forwarder, file)    # PASS
+    #RandomDuplicateTest.RandomDuplicateTest(forwarder, file)    # PASS
     #RandomReorderTest.RandomReorderTest(forwarder, file)
 
 """

@@ -12,12 +12,15 @@ class Sender(BasicSender.BasicSender):
     DEBUG = True
     MAX_PACKET_SIZE = 1472
     WINDOW_SIZE = 5
-    
-    currentMessageType = "start"
-    nextPacketData = "WHAT LE FUDGE"
         
     startSize = MAX_PACKET_SIZE - sys.getsizeof("start") - 3*sys.getsizeof("|") - sys.getsizeof(0) - sys.getsizeof(0xffffffff)
     dataSize = MAX_PACKET_SIZE - sys.getsizeof("data") - 3*sys.getsizeof("|") - sys.getsizeof(0) - sys.getsizeof(0xffffffff)        
+    endSize = MAX_PACKET_SIZE - sys.getsizeof("end") - 3*sys.getsizeof("|") - sys.getsizeof(0) - sys.getsizeof(0xffffffff)
+    
+    currentMessageType = "start"
+    currentMessageSize = dataSize   # We manually read in start packet.  This needs to change to endSize at appropriate times.
+    currentPacketData = "FUDGE FUDGE FUDGE"
+    nextPacketData = "WHAT LE FUDGE"
         
     packetList = {}  # Keep track of packets.  We may need to resend.
     input_complete = False # True only if we have read everything.  No need to make new packets.
@@ -33,20 +36,21 @@ class Sender(BasicSender.BasicSender):
             
         packetsToBeSent = []
         
-        self.nextPacketData = self.infile.read(self.startSize)
-        startPacket = self.make_packet(self.currentMessageType, self.current_seq_num, self.nextPacketData)
+        self.currentPacketData = self.infile.read(self.startSize)
+        self.nextPacketData = self.infile.read(self.dataSize) 
+        startPacket = self.make_packet(self.currentMessageType, self.current_seq_num, self.currentPacketData)
         self.packetList[0] = startPacket
         packetsToBeSent.append(startPacket)
-               
         self.updateAndCheck()
-        self.current_seq_num += 1
+        
+        ### NEED TO TAKE CARE OF SPECIAL CASE
+        
 
         # Manually make the first batch                
-        while len(self.packetList) < 5 and self.currentMessageType != "end":
-            self.packetList[self.current_seq_num] = self.make_packet(self.currentMessageType, self.current_seq_num, self.nextPacketData)
-            packetsToBeSent.append(self.packetList[self.current_seq_num])
+        while len(self.packetList) < 5:
+            self.packetList[self.current_seq_num] = self.make_packet(self.currentMessageType, self.current_seq_num, self.currentPacketData)
+            packetsToBeSent.append(self.make_packet(self.currentMessageType, self.current_seq_num, self.currentPacketData))
             self.updateAndCheck()     
-            self.current_seq_num += 1
         
         # Main loop for sending.                      
         sendLoopCtrl = True
@@ -54,7 +58,7 @@ class Sender(BasicSender.BasicSender):
         
         while(sendLoopCtrl):
             if self.DEBUG:
-                print "NOTICE: current_seq_num: %d. Sending %d packets " % (self.current_seq_num, len(packetsToBeSent))
+                print "NOTICE: current_seq_num: %d. Sending %d packets.  last_seq_num = %d " % (self.current_seq_num, len(packetsToBeSent), self.last_seq_num)
             
             #send packets
             for packet in packetsToBeSent:
@@ -98,28 +102,17 @@ class Sender(BasicSender.BasicSender):
     ASSUMES that 'end' packet has not yet been reached.  If it has, then you are screwed.
     '''
     def updateAndCheck(self):
-        self.nextPacketData = self.infile.read(self.dataSize)
+        self.currentPacketData = self.nextPacketData[:]
+        self.nextPacketData = self.infile.read(self.currentMessageSize)
         if not self.nextPacketData: # if it's ""
             if self.DEBUG:
                 print "CURRENT PACKET SHOULD BE THE LAST ONE.  current_seq_num: %d" % self.current_seq_num
             self.currentMessageType = "end"
+            #self.currentMessageSize = endSize
             self.last_seq_num = self.current_seq_num
+        else:
+            self.current_seq_num += 1
                                         
-    '''
-    Input: current list of packets, seqno of last packet to be ACK'ed
-    Used to stop the loop once we get an ACK from the receiver for the 'end' packet
-    '''
-    def lastPacketACKed(self, packetList, last_acked):
-        try:
-            if self.DEBUG:
-                if(last_acked > 0):
-                    print "Testing packet", last_acked, " for end.  Msg_type: ",  packetList[last_acked].split("|")[0]
-            if (last_acked > 0 and packetList[last_acked].split('|')[0] == "end"):
-                return True
-            return False
-        except KeyError:
-            return False
-    
     
     '''
     Input: seq_num of last ACK , how many packets to send
@@ -133,17 +126,16 @@ class Sender(BasicSender.BasicSender):
                 batchToSend.append(self.packetList[seq_num])
         else:   # We didn't read all the packets yet
          
-            # First add all the packets 
+            # First add all the packets that we have
             for seq_num in range(startNumber, max(self.packetList.keys()) + 1):
                 batchToSend.append(self.packetList[seq_num])
             
             # If we need to throw in more packets, do so now.
             while len(batchToSend) < 5 and self.current_seq_num <= self.last_seq_num:
-                new_packet = self.make_packet(self.currentMessageType, self.current_seq_num, self.nextPacketData)
+                new_packet = self.make_packet(self.currentMessageType, self.current_seq_num, self.currentPacketData)
                 self.packetList[self.current_seq_num] = new_packet
                 batchToSend.append(new_packet)
                 self.updateAndCheck()
-                self.current_seq_num += 1
                  
             if self.DEBUG:
                 batchKeys = []
@@ -165,15 +157,13 @@ class Sender(BasicSender.BasicSender):
         currentACK = self.receive(0.5)
         while currentACK != None:  # If we get something, then check CHECKSUM
             temp = currentACK.split("|")
-            if not (len(temp) == 3 and temp[1].isdigit() and temp[2].isdigit() and temp[1] != "ack"):  # ignore
+            if not (len(temp) == 3 and temp[1].isdigit() and temp[2].isdigit() and temp[0] == "ack"):  # ignore
                 if self.DEBUG:
-                    print "Received corrupted packet.  Disregarding."
+                    print "Disregarding corrupted packet: %s" % currentACK
                 currentACK = self.receive(0.5)
                 continue
             
             if Checksum.validate_checksum(currentACK):
-                if self.DEBUG:
-                    print "Received corrupted packet.  Disregarding."
                 msg_type, seqno, checksum = currentACK.split('|')
                 ACKlist.append(seqno) #put the next expected packet number in the list
             elif self.DEBUG:
@@ -186,7 +176,7 @@ class Sender(BasicSender.BasicSender):
         ACKlist = map(int, ACKlist)
         
         if self.DEBUG:
-            print "Received %d ACK's.  Highest is %d" % (len(ACKlist), max(ACKlist) if ACKlist else -1)
+            print "Received %d ACK's.  Highest is %d: the receiver has everything to %d" % (len(ACKlist), max(ACKlist) if ACKlist else -1, max(ACKlist)-1 if ACKlist else -1)
 
         # No ACKs to be received.  Act accordingly.
         if ACKlist:
@@ -195,7 +185,23 @@ class Sender(BasicSender.BasicSender):
                     del self.packetList[key]
             
         return ACKlist
-
+    
+    '''
+    Input: current list of packets, seqno of last packet to be ACK'ed
+    Used to stop the loop once we get an ACK from the receiver for the 'end' packet
+    '''
+    def lastPacketACKed(self, packetList, last_acked):
+        try:
+            if self.DEBUG:
+                if(last_acked > 0):
+                    print "Testing packet", last_acked, " for end.  Msg_type: ",  packetList[last_acked].split("|")[0]
+            if (last_acked > 0 and packetList[last_acked].split('|')[0] == "end"):
+                return True
+            return False
+        except KeyError:
+            return False
+    
+    
 '''
 This will be run if you run this script from the command line. You should not
 change any of this; the grader may rely on the behavior here to test your
