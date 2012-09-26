@@ -17,7 +17,7 @@ class Sender(BasicSender.BasicSender):
     dataSize = MAX_PACKET_SIZE - sys.getsizeof("data") - 3*sys.getsizeof("|") - sys.getsizeof(0) - sys.getsizeof(0xffffffff)        
     endSize = MAX_PACKET_SIZE - sys.getsizeof("end") - 3*sys.getsizeof("|") - sys.getsizeof(0) - sys.getsizeof(0xffffffff)
     
-    currentMessageType = "start"
+    currentMessageType = "data"
     currentMessageSize = dataSize   # We manually read in start packet.  This needs to change to endSize at appropriate times.
     currentPacketData = "FUDGE FUDGE FUDGE"
     nextPacketData = "WHAT LE FUDGE"
@@ -38,7 +38,7 @@ class Sender(BasicSender.BasicSender):
         
         self.currentPacketData = self.infile.read(self.startSize)
         self.nextPacketData = self.infile.read(self.dataSize) 
-        startPacket = self.make_packet(self.currentMessageType, self.current_seq_num, self.currentPacketData)
+        startPacket = self.make_packet("start", self.current_seq_num, self.currentPacketData)
         self.packetList[0] = startPacket
         packetsToBeSent.append(startPacket)
         self.updateAndCheck()
@@ -173,7 +173,7 @@ class Sender(BasicSender.BasicSender):
         ACKlist = map(int, ACKlist)
         
         if self.DEBUG:
-            print "Received %d ACK's.  Highest is %d: the receiver has everything to %d" % (len(ACKlist), max(ACKlist) if ACKlist else -1, max(ACKlist)-1 if ACKlist else -1)
+            print "Received %d ACK's: %s.  Highest is %d: the receiver has everything to %d" % (len(ACKlist), ACKlist, max(ACKlist) if ACKlist else -1, max(ACKlist)-1 if ACKlist else -1)
 
         # No ACKs to be received.  Act accordingly.
         if ACKlist:
