@@ -2,6 +2,12 @@
 Davis Burton
 Paul Yeem
 2)
-The first challenged we faced was deciding when to send packets.  Eventually, we figured out that our sender should only respond once our listener socket stopped receiveing packets for the given timeout. 
+The first challenged we faced was deciding when to send packets.  
+Eventually, we figured out that our sender should only respond 
+once our listener socket stopped receiveing packets for the given 
+timeout. 
 
-The rest was conceptually pretty easy, but some of the details of keeping track of which packet we were on was difficult.  Additionally, it was tricky to keep a pointer to specific 'old' packets we still needed while making new ones on-demand.
+The rest was conceptually pretty easy, but some of the details 
+of keeping track of which packet we were on was difficult.  
+Additionally, it was tricky to keep a pointer to specific 'old' 
+packets we still needed while making new ones on-demand.
